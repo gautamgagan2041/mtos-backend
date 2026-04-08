@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log
+.env
+uploads/employees/*
+uploads/compliance/*
+uploads/tender-docs/*
+uploads/temp/*
+tests/
+*.test.js
