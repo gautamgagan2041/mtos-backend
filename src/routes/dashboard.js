@@ -7,6 +7,7 @@ const router = express.Router();
 
 router.use(protect, resolveTenant, requireTenant);
 
+router.get('/', (req,res) => res.redirect('/api/dashboard/summary'));
 router.get('/summary', async (req, res, next) => {
   try {
     const now = new Date();
@@ -64,3 +65,4 @@ router.get('/summary', async (req, res, next) => {
 });
 
 module.exports = router;
+

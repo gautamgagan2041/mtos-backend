@@ -4,6 +4,7 @@ const prisma = require('../config/database');
 const { protect, can } = require('../middleware/auth');
 const { resolveTenant, requireTenant } = require('../middleware/tenant');
 const audit = require('../services/auditService');
+const { validate, schemas } = require('../middleware/validate');
 const router = express.Router();
 
 router.use(protect, resolveTenant, requireTenant);
@@ -82,7 +83,7 @@ router.get('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post('/', can('canManageTenders'), async (req, res, next) => {
+router.post('/', can('canManageTenders'), validate(schemas.createTender), async (req, res, next) => {
   try {
     const { salaryStructures, ...tenderData } = req.body;
     const tender = await prisma.tender.create({

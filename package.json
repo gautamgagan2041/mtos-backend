@@ -1,55 +1,59 @@
 {
-  "name": "mtos-backend",
-  "version": "2.0.0",
-  "description": "MTOS — Manpower Tender Operating System — Multi-Tenant SaaS Backend",
-  "main": "src/index.js",
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "scripts": {
-    "dev": "nodemon src/index.js",
-    "start": "node src/index.js",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
-    "db:migrate:deploy": "prisma migrate deploy",
-    "db:seed": "node prisma/seed.js",
-    "db:studio": "prisma studio",
-    "db:reset": "prisma migrate reset --force && node prisma/seed.js",
-    "test": "jest --testPathPattern=tests/ --forceExit",
-    "test:watch": "jest --watch",
-    "lint": "eslint src/ --ext .js",
-    "lint:fix": "eslint src/ --ext .js --fix"
-  },
-  "dependencies": {
-    "@aws-sdk/client-s3": "^3.490.0",
-    "@aws-sdk/s3-request-presigner": "^3.490.0",
-    "@prisma/client": "^5.7.1",
-    "bcryptjs": "^2.4.3",
-    "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "express-rate-limit": "^7.1.5",
-    "express-validator": "^7.0.1",
-    "helmet": "^7.1.0",
-    "jsonwebtoken": "^9.0.2",
-    "morgan": "^1.10.0",
-    "multer": "^1.4.5-lts.1",
-    "node-cron": "^3.0.3",
-    "nodemailer": "^6.9.7",
-    "uuid": "^9.0.1",
-    "winston": "^3.11.0",
-    "xlsx": "^0.18.5"
-  },
-  "devDependencies": {
-    "eslint": "^8.56.0",
-    "jest": "^29.7.0",
-    "nodemon": "^3.0.2",
-    "prisma": "^5.7.1",
-    "supertest": "^6.3.4"
-  },
-  "jest": {
-    "testEnvironment": "node",
-    "testMatch": ["**/tests/**/*.test.js"]
-  }
+    "name":  "mtos-backend",
+    "version":  "2.0.0",
+    "description":  "MTOS — Manpower Tender Operating System — Multi-Tenant SaaS Backend",
+    "main":  "src/index.js",
+    "engines":  {
+                    "node":  "\u003e=18.0.0"
+                },
+    "scripts":  {
+                    "dev":  "nodemon src/index.js",
+                    "start":  "node src/index.js",
+                    "db:generate":  "prisma generate",
+                    "db:push":  "prisma db push",
+                    "db:migrate":  "prisma migrate dev",
+                    "db:migrate:deploy":  "prisma migrate deploy",
+                    "db:seed":  "node prisma/seed.js",
+                    "db:studio":  "prisma studio",
+                    "db:reset":  "prisma migrate reset --force \u0026\u0026 node prisma/seed.js",
+                    "test":  "jest --testPathPattern=tests/ --forceExit",
+                    "test:watch":  "jest --watch",
+                    "lint":  "eslint src/ --ext .js",
+                    "lint:fix":  "eslint src/ --ext .js --fix"
+                },
+    "dependencies":  {
+                         "@aws-sdk/client-s3":  "^3.1039.0",
+                         "@aws-sdk/s3-request-presigner":  "^3.1039.0",
+                         "@prisma/client":  "^5.7.1",
+                         "archiver":  "^7.0.1",
+                         "bcryptjs":  "^2.4.3",
+                         "bullmq":  "^5.76.4",
+                         "cookie-parser":  "^1.4.7",
+                         "cors":  "^2.8.5",
+                         "decimal.js":  "^10.6.0",
+                         "dotenv":  "^16.3.1",
+                         "expr-eval":  "^2.0.2",
+                         "express":  "^4.18.2",
+                         "express-rate-limit":  "^7.1.5",
+                         "express-validator":  "^7.0.1",
+                         "helmet":  "^7.1.0",
+                         "ioredis":  "^5.10.1",
+                         "jsonwebtoken":  "^9.0.2",
+                         "morgan":  "^1.10.0",
+                         "multer":  "^1.4.5-lts.1",
+                         "node-cron":  "^3.0.3",
+                         "nodemailer":  "^6.10.1",
+                         "puppeteer":  "^24.42.0",
+                         "razorpay":  "^2.9.6",
+                         "uuid":  "^9.0.1",
+                         "winston":  "^3.19.0",
+                         "xlsx":  "^0.18.5"
+                     },
+    "devDependencies":  {
+                            "eslint":  "^8.56.0",
+                            "jest":  "^29.7.0",
+                            "nodemon":  "^3.0.2",
+                            "prisma":  "^5.7.1",
+                            "supertest":  "^6.3.4"
+                        }
 }

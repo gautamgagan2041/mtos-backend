@@ -7,6 +7,7 @@ const { protect, can } = require('../middleware/auth');
 const { resolveTenant, requireTenant, checkEmployeeLimit } = require('../middleware/tenant');
 const audit = require('../services/auditService');
 const storage = require('../services/storageService');
+const { validate, schemas } = require('../middleware/validate');
 const router = express.Router();
 
 const upload = multer({
@@ -104,7 +105,7 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post('/', can('canManageEmployees'), checkEmployeeLimit, async (req, res, next) => {
+router.post('/', can('canManageEmployees'), checkEmployeeLimit, validate(schemas.createEmployee), async (req, res, next) => {
   try {
     const { tenderId, rank, joiningDate, ...rawData } = req.body;
     const empData = sanitizeEmployeeData(rawData);

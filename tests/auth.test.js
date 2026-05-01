@@ -4,9 +4,9 @@ const app = require('../src/index');
 
 describe('Auth API', () => {
   test('GET /api/health returns 200', async () => {
-    const res = await request(app).get('/api/health');
+    const res = await request(app).get('/health');
     expect(res.statusCode).toBe(200);
-    expect(res.body.status).toBe('OK');
+    expect(res.body.status).toBe('ok');
   });
 
   test('POST /api/auth/login with missing credentials returns 400', async () => {
@@ -18,7 +18,7 @@ describe('Auth API', () => {
   test('POST /api/auth/login with wrong credentials returns 401', async () => {
     const res = await request(app)
       .post('/api/auth/login')
-      .send({ email: 'nobody@test.com', password: 'wrong' });
+      .send({ email: 'nobody@test.com', password: 'wrongpassword123' });
     expect(res.statusCode).toBe(401);
   });
 

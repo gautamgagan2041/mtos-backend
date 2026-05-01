@@ -1,7 +1,3 @@
-// ── MTOS Database Schema v3.1 ─────────────────────────────────────
-// v3.1 adds: ComponentNature, TenderComponentOverride,
-//            layered cost fields on PayrollRow and PayrollRun
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,7 +7,763 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ── ENUMS ─────────────────────────────────────────────────────────
+model Tenant {
+  id               String                  @id @default(uuid())
+  name             String
+  slug             String                  @unique
+  gstin            String?
+  pan              String?
+  epfRegNo         String?                 @map("epf_reg_no")
+  esicRegNo        String?                 @map("esic_reg_no")
+  address          String?
+  city             String?
+  state            String?
+  phone            String?
+  email            String?
+  logoUrl          String?                 @map("logo_url")
+  plan             TenantPlan              @default(STARTER)
+  status           TenantStatus            @default(TRIAL)
+  trialEndsAt      DateTime?               @map("trial_ends_at")
+  billingEmail     String?                 @map("billing_email")
+  maxEmployees     Int                     @default(100) @map("max_employees")
+  storageProvider  StorageProvider         @default(LOCAL) @map("storage_provider")
+  s3Bucket         String?                 @map("s3_bucket")
+  s3Region         String?                 @map("s3_region")
+  createdAt        DateTime                @default(now()) @map("created_at")
+  updatedAt        DateTime                @updatedAt @map("updated_at")
+  auditLogs        AuditLog[]
+  clients          Client[]
+  alerts           ComplianceAlert[]
+  complianceDocs   ComplianceDocument[]
+  employees        Employee[]
+  esicFilings      ESICFilingRecord[]
+  esicPeriods      ESICPeriod[]
+  invoiceSequences InvoiceSequence[]
+  invoices         Invoice[]
+  payComponents    PayComponent[]
+  payrollRuns      PayrollRun[]
+  pfFilings        PFFilingRecord[]
+  ptConfigs        ProfessionalTaxConfig[]
+  salaryStructures SalaryStructure[]
+  tenders          Tender[]
+  users            User[]
+
+  @@map("tenants")
+}
+
+model User {
+  id                String                @id @default(uuid())
+  tenantId          String?               @map("tenant_id")
+  name              String
+  email             String                @unique
+  passwordHash      String                @map("password_hash")
+  role              UserRole              @default(HR_MANAGER)
+  phone             String?
+  isActive          Boolean               @default(true) @map("is_active")
+  lastLogin         DateTime?             @map("last_login")
+  lastIp            String?               @map("last_ip")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+  lastUserAgent     String?               @map("last_user_agent")
+  failedAttempts    Int                   @default(0) @map("failed_attempts")
+  lockUntil         DateTime?             @map("lock_until")
+  auditLogs         AuditLog[]
+  uploadedDocs      ComplianceDocument[]
+  disbursements     PaymentDisbursement[]
+  payrollRuns       PayrollRun[]
+  refreshTokens     RefreshToken[]
+  tendersSupervised TenderEmployee[]      @relation("SupervisorRelation")
+  tenant            Tenant?               @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  userAgent String?  @map("user_agent")
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Client {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  shortName String?  @map("short_name")
+  gstin     String?
+  address   String?
+  state     String?
+  stateCode String?  @map("state_code")
+  phone     String?
+  email     String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  tenders   Tender[]
+
+  @@index([tenantId])
+  @@map("clients")
+}
+
+model Tender {
+  id                     String                    @id @default(uuid())
+  tenantId               String                    @map("tenant_id")
+  clientId               String                    @map("client_id")
+  name                   String
+  code                   String?
+  location               String?
+  startDate              DateTime                  @map("start_date")
+  endDate                DateTime                  @map("end_date")
+  status                 TenderStatus              @default(ACTIVE)
+  poNumber               String?                   @map("po_number")
+  workOrder              String?                   @map("work_order")
+  description            String?
+  createdAt              DateTime                  @default(now()) @map("created_at")
+  updatedAt              DateTime                  @updatedAt @map("updated_at")
+  salaryStructureId      String?                   @map("salary_structure_id")
+  billingConfig          BillingConfig?
+  alerts                 ComplianceAlert[]
+  complianceDocs         ComplianceDocument[]
+  invoices               Invoice[]
+  manpowerRequirements   ManpowerRequirement[]
+  payrollRuns            PayrollRun[]
+  componentOverrides     TenderComponentOverride[]
+  tenderDocs             TenderDocument[]
+  employees              TenderEmployee[]
+  legacySalaryStructures TenderSalaryStructure[]
+  client                 Client                    @relation(fields: [clientId], references: [id])
+  salaryStructure        SalaryStructure?          @relation(fields: [salaryStructureId], references: [id])
+  tenant                 Tenant                    @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("tenders")
+}
+
+model BillingConfig {
+  id                   String   @id @default(uuid())
+  tenderId             String   @unique @map("tender_id")
+  gstMode              GstMode  @default(REVERSE_CHARGE) @map("gst_mode")
+  cgstRate             Decimal @db.Decimal(14,2)    @default(0.09) @map("cgst_rate")
+  sgstRate             Decimal @db.Decimal(14,2)    @default(0.09) @map("sgst_rate")
+  igstRate             Decimal @db.Decimal(14,2)    @default(0) @map("igst_rate")
+  serviceChargeRate    Decimal @db.Decimal(14,2)    @default(0.10) @map("service_charge_rate")
+  includeServiceCharge Boolean  @default(true) @map("include_service_charge")
+  invoicePrefix        String   @default("INV") @map("invoice_prefix")
+  sacCode              String   @default("998525") @map("sac_code")
+  paymentTermsDays     Int      @default(30) @map("payment_terms_days")
+  notes                String?
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+  tender               Tender   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@map("billing_configs")
+}
+
+model ManpowerRequirement {
+  id            String    @id @default(uuid())
+  tenderId      String    @map("tender_id")
+  tenantId      String    @map("tenant_id")
+  categoryCode  String    @map("category_code")
+  categoryName  String    @map("category_name")
+  requiredPosts Int       @map("required_posts")
+  monthlyRate   Decimal @db.Decimal(14,2)     @map("monthly_rate")
+  effectiveFrom DateTime  @map("effective_from")
+  effectiveTo   DateTime? @map("effective_to")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  tender        Tender    @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@index([tenderId])
+  @@index([tenantId])
+  @@map("manpower_requirements")
+}
+
+model Invoice {
+  id            String            @id @default(uuid())
+  tenderId      String            @map("tender_id")
+  invoiceNo     String            @map("invoice_no")
+  year          Int
+  serviceCharge Decimal @db.Decimal(14,2)             @default(0) @map("service_charge")
+  taxableValue  Decimal @db.Decimal(14,2)             @default(0) @map("taxable_value")
+  cgst          Decimal @db.Decimal(14,2)             @default(0)
+  sgst          Decimal @db.Decimal(14,2)             @default(0)
+  grandTotal    Decimal @db.Decimal(14,2)             @default(0) @map("grand_total")
+  paidOn        DateTime?         @map("paid_on")
+  paidAmount    Decimal? @db.Decimal(14,2)            @map("paid_amount")
+  notes         String?
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  gstMode       GstMode           @map("gst_mode")
+  igst          Decimal @db.Decimal(14,2)             @default(0)
+  periodEnd     DateTime          @map("period_end")
+  periodStart   DateTime          @map("period_start")
+  subtotal      Decimal @db.Decimal(14,2)             @default(0)
+  tenantId      String            @map("tenant_id")
+  month         Int
+  status        InvoiceStatus     @default(DRAFT)
+  lineItems     InvoiceLineItem[]
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
+  tender        Tender            @relation(fields: [tenderId], references: [id])
+
+  @@unique([tenantId, invoiceNo])
+  @@index([tenantId])
+  @@index([tenderId, month, year])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id            String   @id @default(uuid())
+  invoiceId     String   @map("invoice_id")
+  categoryCode  String   @map("category_code")
+  categoryName  String   @map("category_name")
+  requiredPosts Int      @map("required_posts")
+  monthlyRate   Decimal @db.Decimal(14,2)    @map("monthly_rate")
+  workingDays   Int      @map("working_days")
+  standardDays  Int      @map("standard_days")
+  amount        Decimal @db.Decimal(14,2)
+  sacCode       String   @map("sac_code")
+  displayOrder  Int      @default(0) @map("display_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+  invoice       Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
+
+model InvoiceSequence {
+  id       String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  prefix   String
+  fy       String
+  lastSeq  Int    @default(0) @map("last_seq")
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, prefix, fy])
+  @@map("invoice_sequences")
+}
+
+model TenderSalaryStructure {
+  id            String   @id @default(uuid())
+  tenderId      String   @map("tender_id")
+  rank          String
+  basicSalary   Decimal @db.Decimal(14,2)    @map("basic_salary")
+  vda           Decimal @db.Decimal(14,2)    @default(0)
+  hraType       String   @default("percentage") @map("hra_type")
+  hraValue      Decimal @db.Decimal(14,2)    @default(0.08) @map("hra_value")
+  hraMinimum    Decimal @db.Decimal(14,2)    @default(1800) @map("hra_minimum")
+  washingRate   Decimal @db.Decimal(14,2)    @default(0.03) @map("washing_rate")
+  bonusRate     Decimal @db.Decimal(14,2)    @default(0.0833) @map("bonus_rate")
+  bonusEnabled  Boolean  @default(true) @map("bonus_enabled")
+  uniformRate   Decimal @db.Decimal(14,2)    @default(0.05) @map("uniform_rate")
+  pfRule        PFRule   @default(CAPPED) @map("pf_rule")
+  pfCap         Decimal @db.Decimal(14,2)    @default(15000) @map("pf_cap")
+  pfEERate      Decimal @db.Decimal(14,2)    @default(0.12) @map("pf_ee_rate")
+  pfERRate      Decimal @db.Decimal(14,2)    @default(0.12) @map("pf_er_rate")
+  esicEnabled   Boolean  @default(true) @map("esic_enabled")
+  esicThreshold Decimal @db.Decimal(14,2)    @default(21000) @map("esic_threshold")
+  esicEERate    Decimal @db.Decimal(14,2)    @default(0.0075) @map("esic_ee_rate")
+  esicERRate    Decimal @db.Decimal(14,2)    @default(0.0325) @map("esic_er_rate")
+  baseDivisor   Int      @default(26) @map("base_divisor")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  tender        Tender   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@unique([tenderId, rank])
+  @@map("tender_salary_structures")
+}
+
+model SalaryStructure {
+  id          String                     @id @default(uuid())
+  tenantId    String                     @map("tenant_id")
+  name        String
+  description String?
+  createdAt   DateTime                   @default(now()) @map("created_at")
+  updatedAt   DateTime                   @updatedAt @map("updated_at")
+  isActive    Boolean                    @default(true) @map("is_active")
+  rank        String?
+  components  SalaryStructureComponent[]
+  tenant      Tenant                     @relation(fields: [tenantId], references: [id])
+  tenders     Tender[]
+
+  @@index([tenantId])
+  @@map("salary_structures")
+}
+
+model PayComponent {
+  id                  String                     @id @default(uuid())
+  tenantId            String                     @map("tenant_id")
+  code                String
+  name                String
+  isStatutory         Boolean                    @default(false) @map("is_statutory")
+  displayOrder        Int                        @default(0) @map("display_order")
+  createdAt           DateTime                   @default(now()) @map("created_at")
+  description         String?
+  isActive            Boolean                    @default(true) @map("is_active")
+  updatedAt           DateTime                   @updatedAt @map("updated_at")
+  type                ComponentType
+  nature              ComponentNature            @default(EARNING)
+  tenant              Tenant                     @relation(fields: [tenantId], references: [id])
+  rowComponents       PayrollRowComponent[]
+  structureComponents SalaryStructureComponent[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("pay_components")
+}
+
+model SalaryStructureComponent {
+  id                String                    @id @default(uuid())
+  salaryStructureId String                    @map("salary_structure_id")
+  componentId       String                    @map("component_id")
+  value             Decimal? @db.Decimal(14,2)
+  threshold         Decimal? @db.Decimal(14,2)
+  thresholdBonus    Decimal? @db.Decimal(14,2)                    @map("threshold_bonus")
+  formula           String?
+  isActive          Boolean                   @default(true) @map("is_active")
+  calculationType   CalculationType           @map("calculation_type")
+  natureOverride    ComponentNature?          @map("nature_override")
+  component         PayComponent              @relation(fields: [componentId], references: [id])
+  salaryStructure   SalaryStructure           @relation(fields: [salaryStructureId], references: [id], onDelete: Cascade)
+  tenderOverrides   TenderComponentOverride[]
+
+  @@unique([salaryStructureId, componentId])
+  @@map("salary_structure_components")
+}
+
+model TenderComponentOverride {
+  id                    String                   @id @default(uuid())
+  tenderId              String                   @map("tender_id")
+  salaryStructureCompId String                   @map("salary_structure_comp_id")
+  tenantId              String                   @map("tenant_id")
+  isEnabled             Boolean?                 @map("is_enabled")
+  valueOverride         Decimal? @db.Decimal(14,2)                   @map("value_override")
+  formulaOverride       String?                  @map("formula_override")
+  notes                 String?
+  createdAt             DateTime                 @default(now()) @map("created_at")
+  updatedAt             DateTime                 @updatedAt @map("updated_at")
+  structureComp         SalaryStructureComponent @relation(fields: [salaryStructureCompId], references: [id], onDelete: Cascade)
+  tender                Tender                   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@unique([tenderId, salaryStructureCompId])
+  @@index([tenantId])
+  @@map("tender_component_overrides")
+}
+
+model PayrollRun {
+  id                 String        @id @default(uuid())
+  tenderId           String        @map("tender_id")
+  year               Int
+  status             PayrollStatus @default(DRAFT)
+  totalGross         Decimal @db.Decimal(14,2)         @default(0) @map("total_gross")
+  totalNet           Decimal @db.Decimal(14,2)         @default(0) @map("total_net")
+  totalPFEE          Decimal @db.Decimal(14,2)         @default(0) @map("total_pf_ee")
+  totalPFER          Decimal @db.Decimal(14,2)         @default(0) @map("total_pf_er")
+  totalESIC          Decimal @db.Decimal(14,2)         @default(0) @map("total_esic")
+  runBy              String        @map("run_by")
+  lockedAt           DateTime?     @map("locked_at")
+  lockedBy           String?       @map("locked_by")
+  notes              String?
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+  tenantId           String        @map("tenant_id")
+  totalPT            Decimal @db.Decimal(14,2)         @default(0) @map("total_pt")
+  month              Int
+  totalProvisions    Decimal @db.Decimal(14,2)         @default(0) @map("total_provisions")
+  totalTenderCosts   Decimal @db.Decimal(14,2)         @default(0) @map("total_tender_costs")
+  totalEmployerCosts Decimal @db.Decimal(14,2)         @default(0) @map("total_employer_costs")
+  totalCostToClient  Decimal @db.Decimal(14,2)         @default(0) @map("total_cost_to_client")
+  rows               PayrollRow[]
+  runByUser          User          @relation(fields: [runBy], references: [id])
+  tenant             Tenant        @relation(fields: [tenantId], references: [id])
+  tender             Tender        @relation(fields: [tenderId], references: [id])
+
+  @@unique([tenderId, month, year])
+  @@index([tenantId])
+  @@map("payroll_runs")
+}
+
+model PayrollRow {
+  id                 String                @id @default(uuid())
+  runId              String                @map("run_id")
+  employeeId         String                @map("employee_id")
+  attendanceId       String?               @map("attendance_id")
+  rank               String?
+  workDays           Int                   @default(0) @map("work_days")
+  extraDutyDays      Int                   @default(0) @map("extra_duty_days")
+  isSplitRow         Boolean               @default(false) @map("is_split_row")
+  payableBasic       Decimal? @db.Decimal(14,2)                @map("payable_basic")
+  hra                Decimal? @db.Decimal(14,2)
+  washingAllow       Decimal? @db.Decimal(14,2)                @map("washing_allow")
+  bonus              Decimal? @db.Decimal(14,2)
+  uniformAllow       Decimal? @db.Decimal(14,2)                @map("uniform_allow")
+  extraDutyAmt       Decimal? @db.Decimal(14,2)                @map("extra_duty_amt")
+  pfWage             Decimal @db.Decimal(14,2)                 @default(0) @map("pf_wage")
+  pfEE               Decimal @db.Decimal(14,2)                 @default(0) @map("pf_ee")
+  pfER               Decimal @db.Decimal(14,2)                 @default(0) @map("pf_er")
+  esicEE             Decimal @db.Decimal(14,2)                 @default(0) @map("esic_ee")
+  esicER             Decimal @db.Decimal(14,2)                 @default(0) @map("esic_er")
+  totalDeductions    Decimal @db.Decimal(14,2)                 @default(0) @map("total_deductions")
+  netPay             Decimal @db.Decimal(14,2)                 @default(0) @map("net_pay")
+  adminCharge        Decimal @db.Decimal(14,2)                 @default(0) @map("admin_charge")
+  createdAt          DateTime              @default(now()) @map("created_at")
+  edli               Decimal @db.Decimal(14,2)                 @default(0)
+  erEPF              Decimal @db.Decimal(14,2)                 @default(0) @map("er_epf")
+  erEPS              Decimal @db.Decimal(14,2)                 @default(0) @map("er_eps")
+  grossEarnings      Decimal @db.Decimal(14,2)                 @default(0) @map("gross_earnings")
+  pt                 Decimal @db.Decimal(14,2)                 @default(0)
+  vdaPayable         Decimal? @db.Decimal(14,2)                @map("vda_payable")
+  bonusProvision     Decimal @db.Decimal(14,2)                 @default(0) @map("bonus_provision")
+  gratuityProvision  Decimal @db.Decimal(14,2)                 @default(0) @map("gratuity_provision")
+  leaveWageProvision Decimal @db.Decimal(14,2)                 @default(0) @map("leave_wage_provision")
+  uniformCost        Decimal @db.Decimal(14,2)                 @default(0) @map("uniform_cost")
+  washingCost        Decimal @db.Decimal(14,2)                 @default(0) @map("washing_cost")
+  relieverCost       Decimal @db.Decimal(14,2)                 @default(0) @map("reliever_cost")
+  totalEmployerCost  Decimal @db.Decimal(14,2)                 @default(0) @map("total_employer_cost")
+  components         PayrollRowComponent[]
+  attendance         Attendance?           @relation(fields: [attendanceId], references: [id])
+  employee           Employee              @relation(fields: [employeeId], references: [id])
+  run                PayrollRun            @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([employeeId])
+  @@map("payroll_rows")
+}
+
+model PayrollRowComponent {
+  id              String          @id @default(uuid())
+  rowId           String          @map("row_id")
+  componentId     String          @map("component_id")
+  componentName   String          @map("component_name")
+  componentCode   String          @map("component_code")
+  type            ComponentType
+  calculationType CalculationType @map("calculation_type")
+  computedValue   Decimal @db.Decimal(14,2)           @default(0) @map("computed_value")
+  component       PayComponent    @relation(fields: [componentId], references: [id])
+  row             PayrollRow      @relation(fields: [rowId], references: [id], onDelete: Cascade)
+
+  @@index([rowId])
+  @@map("payroll_row_components")
+}
+
+model Employee {
+  id                String                @id @default(uuid())
+  tenantId          String                @map("tenant_id")
+  sr                Int?
+  name              String
+  fatherName        String?               @map("father_name")
+  dob               DateTime?
+  gender            String?
+  phone             String?
+  email             String?
+  address           String?
+  aadhaar           String?
+  pan               String?
+  uan               String?
+  pfNumber          String?               @map("pf_number")
+  esicNumber        String?               @map("esic_number")
+  bankAccount       String?               @map("bank_account")
+  ifscCode          String?               @map("ifsc_code")
+  bankName          String?               @map("bank_name")
+  status            EmployeeStatus        @default(ACTIVE)
+  photoUrl          String?               @map("photo_url")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+  documents         EmployeeDocument[]
+  tenant            Tenant                @relation(fields: [tenantId], references: [id])
+  esicPeriods       ESICPeriod[]
+  disbursements     PaymentDisbursement[]
+  payrollRows       PayrollRow[]
+  replacedBy        Replacement[]         @relation("ExitedEmployee")
+  replacements      Replacement[]         @relation("ReplacementEmployee")
+  tenderAssignments TenderEmployee[]
+
+  @@unique([tenantId, uan])
+  @@index([tenantId])
+  @@map("employees")
+}
+
+model TenderEmployee {
+  id            String       @id @default(uuid())
+  tenderId      String       @map("tender_id")
+  employeeId    String       @map("employee_id")
+  rank          String
+  joiningDate   DateTime     @map("joining_date")
+  exitDate      DateTime?    @map("exit_date")
+  exitReason    ExitReason?  @map("exit_reason")
+  exitNote      String?      @map("exit_note")
+  pfExitFiled   Boolean      @default(false) @map("pf_exit_filed")
+  esicExitFiled Boolean      @default(false) @map("esic_exit_filed")
+  supervisorId  String?      @map("supervisor_id")
+  isActive      Boolean      @default(true) @map("is_active")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  isReliever    Boolean      @default(false) @map("is_reliever")
+  attendance    Attendance[]
+  employee      Employee     @relation(fields: [employeeId], references: [id])
+  supervisor    User?        @relation("SupervisorRelation", fields: [supervisorId], references: [id])
+  tender        Tender       @relation(fields: [tenderId], references: [id])
+
+  @@unique([tenderId, employeeId])
+  @@map("tender_employees")
+}
+
+model Attendance {
+  id               String         @id @default(uuid())
+  tenderEmployeeId String         @map("tender_employee_id")
+  year             Int
+  presentDays      Int            @default(0) @map("present_days")
+  extraDutyDays    Int            @default(0) @map("extra_duty_days")
+  splitDays        Int            @default(0) @map("split_days")
+  splitRank        String?        @map("split_rank")
+  dailyData        Json?          @map("daily_data")
+  isLocked         Boolean        @default(false) @map("is_locked")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  nightShifts      Decimal @db.Decimal(14,2)          @default(0) @map("night_shifts")
+  otHours          Decimal @db.Decimal(14,2)          @default(0) @map("ot_hours")
+  tenantId         String         @map("tenant_id")
+  month            Int
+  tenderEmployee   TenderEmployee @relation(fields: [tenderEmployeeId], references: [id])
+  payrollRows      PayrollRow[]
+
+  @@unique([tenderEmployeeId, month, year])
+  @@index([tenantId])
+  @@map("attendance")
+}
+
+model PaymentDisbursement {
+  id            String             @id @default(uuid())
+  tenantId      String             @map("tenant_id")
+  runId         String             @map("run_id")
+  employeeId    String             @map("employee_id")
+  netPay        Decimal @db.Decimal(14,2)              @map("net_pay")
+  bankAccount   String?            @map("bank_account")
+  ifscCode      String?            @map("ifsc_code")
+  bankName      String?            @map("bank_name")
+  status        DisbursementStatus @default(PENDING)
+  utrNo         String?            @map("utr_no")
+  transferredAt DateTime?          @map("transferred_at")
+  transferredBy String?            @map("transferred_by")
+  failureReason String?            @map("failure_reason")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  employee      Employee           @relation(fields: [employeeId], references: [id])
+  transferrer   User?              @relation(fields: [transferredBy], references: [id])
+
+  @@unique([runId, employeeId])
+  @@index([tenantId])
+  @@map("payment_disbursements")
+}
+
+model ProfessionalTaxConfig {
+  id        String                @id @default(uuid())
+  tenantId  String                @map("tenant_id")
+  state     String
+  isActive  Boolean               @default(true) @map("is_active")
+  createdAt DateTime              @default(now()) @map("created_at")
+  updatedAt DateTime              @updatedAt @map("updated_at")
+  tenant    Tenant                @relation(fields: [tenantId], references: [id])
+  slabs     ProfessionalTaxSlab[]
+
+  @@unique([tenantId, state])
+  @@map("professional_tax_configs")
+}
+
+model ProfessionalTaxSlab {
+  id        String                @id @default(uuid())
+  configId  String                @map("config_id")
+  minSalary Decimal @db.Decimal(14,2)                 @map("min_salary")
+  maxSalary Decimal? @db.Decimal(14,2)                @map("max_salary")
+  ptAmount  Decimal @db.Decimal(14,2)                 @map("pt_amount")
+  config    ProfessionalTaxConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
+  @@map("professional_tax_slabs")
+}
+
+model ESICPeriod {
+  id           String    @id @default(uuid())
+  tenantId     String    @map("tenant_id")
+  employeeId   String    @map("employee_id")
+  periodStart  DateTime  @map("period_start")
+  periodEnd    DateTime  @map("period_end")
+  eligible     Boolean
+  grossAtStart Decimal? @db.Decimal(14,2)    @map("gross_at_start")
+  exitDate     DateTime? @map("exit_date")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  employee     Employee  @relation(fields: [employeeId], references: [id])
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, employeeId, periodStart])
+  @@index([tenantId])
+  @@index([employeeId])
+  @@map("esic_periods")
+}
+
+model ComplianceDocument {
+  id              String            @id @default(uuid())
+  tenantId        String            @map("tenant_id")
+  tenderId        String?           @map("tender_id")
+  docType         ComplianceDocType
+  name            String
+  issueDate       DateTime?         @map("issue_date")
+  expiryDate      DateTime?         @map("expiry_date")
+  fileKey         String?           @map("file_key")
+  fileName        String?           @map("file_name")
+  fileSize        Int?              @map("file_size")
+  storageProvider StorageProvider   @default(LOCAL) @map("storage_provider")
+  notes           String?
+  uploadedBy      String?           @map("uploaded_by")
+  alert90Sent     Boolean           @default(false) @map("alert_90_sent")
+  alert60Sent     Boolean           @default(false) @map("alert_60_sent")
+  alert30Sent     Boolean           @default(false) @map("alert_30_sent")
+  isActive        Boolean           @default(true) @map("is_active")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  tender          Tender?           @relation(fields: [tenderId], references: [id])
+  uploadedByUser  User?             @relation(fields: [uploadedBy], references: [id])
+
+  @@unique([tenantId, tenderId, docType])
+  @@index([tenantId])
+  @@map("compliance_documents")
+}
+
+model ComplianceAlert {
+  id         String        @id @default(uuid())
+  tenantId   String        @map("tenant_id")
+  tenderId   String?       @map("tender_id")
+  entityType String        @map("entity_type")
+  entityId   String        @map("entity_id")
+  alertType  AlertType     @map("alert_type")
+  severity   AlertSeverity
+  title      String
+  message    String
+  isResolved Boolean       @default(false) @map("is_resolved")
+  resolvedAt DateTime?     @map("resolved_at")
+  resolvedBy String?       @map("resolved_by")
+  createdAt  DateTime      @default(now()) @map("created_at")
+  tenant     Tenant        @relation(fields: [tenantId], references: [id])
+  tender     Tender?       @relation(fields: [tenderId], references: [id])
+
+  @@unique([tenantId, entityId, alertType])
+  @@index([tenantId])
+  @@map("compliance_alerts")
+}
+
+model TenderDocument {
+  id              String          @id @default(uuid())
+  tenderId        String          @map("tender_id")
+  category        String
+  name            String
+  fileName        String          @map("file_name")
+  fileKey         String          @map("file_key")
+  fileSize        Int?            @map("file_size")
+  mimeType        String?         @map("mime_type")
+  storageProvider StorageProvider @default(LOCAL) @map("storage_provider")
+  uploadedBy      String?         @map("uploaded_by")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  tender          Tender          @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@map("tender_documents")
+}
+
+model Replacement {
+  id                    String   @id @default(uuid())
+  tenderId              String   @map("tender_id")
+  exitedEmployeeId      String   @map("exited_employee_id")
+  replacementEmployeeId String   @map("replacement_employee_id")
+  replacedOn            DateTime @map("replaced_on")
+  note                  String?
+  createdAt             DateTime @default(now()) @map("created_at")
+  exitedEmployee        Employee @relation("ExitedEmployee", fields: [exitedEmployeeId], references: [id])
+  replacementEmployee   Employee @relation("ReplacementEmployee", fields: [replacementEmployeeId], references: [id])
+
+  @@map("replacements")
+}
+
+model EmployeeDocument {
+  id              String          @id @default(uuid())
+  employeeId      String          @map("employee_id")
+  docType         String          @map("doc_type")
+  fileName        String          @map("file_name")
+  fileKey         String          @map("file_key")
+  fileSize        Int?            @map("file_size")
+  mimeType        String?         @map("mime_type")
+  storageProvider StorageProvider @default(LOCAL) @map("storage_provider")
+  verified        Boolean         @default(false)
+  uploadedAt      DateTime        @default(now()) @map("uploaded_at")
+  employee        Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("employee_documents")
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  tenantId   String?     @map("tenant_id")
+  userId     String      @map("user_id")
+  action     AuditAction
+  entityType String      @map("entity_type")
+  entityId   String?     @map("entity_id")
+  oldValues  Json?       @map("old_values")
+  newValues  Json?       @map("new_values")
+  metadata   Json?
+  ipAddress  String?     @map("ip_address")
+  userAgent  String?     @map("user_agent")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  tenant     Tenant?     @relation(fields: [tenantId], references: [id])
+  user       User        @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model PFFilingRecord {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  tenderId  String   @map("tender_id")
+  year      Int
+  challanNo String?  @map("challan_no")
+  amount    Decimal @db.Decimal(14,2)
+  filedDate DateTime @map("filed_date")
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  month     Int
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("pf_filing_records")
+}
+
+model ESICFilingRecord {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  tenderId  String   @map("tender_id")
+  year      Int
+  challanNo String?  @map("challan_no")
+  amount    Decimal @db.Decimal(14,2)
+  filedDate DateTime @map("filed_date")
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  month     Int
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("esic_filing_records")
+}
 
 enum UserRole {
   SUPER_ADMIN
@@ -169,829 +921,10 @@ enum DisbursementStatus {
   ON_HOLD
 }
 
-// NEW in v3.1 — determines which output layer a component feeds
 enum ComponentNature {
-  EARNING        // reaches employee bank account — on payslip
-  DEDUCTION      // deducted from employee — on payslip
-  EMPLOYER_COST  // paid to government — NOT on employee payslip
-  PROVISION      // accrued liability — billed to client, paid later
-  TENDER_COST    // business cost — on client invoice only, never on payslip
-}
-
-// ── TENANT ────────────────────────────────────────────────────────
-
-model Tenant {
-  id              String          @id @default(uuid())
-  name            String
-  slug            String          @unique
-  gstin           String?
-  pan             String?
-  epfRegNo        String?         @map("epf_reg_no")
-  esicRegNo       String?         @map("esic_reg_no")
-  address         String?
-  city            String?
-  state           String?
-  phone           String?
-  email           String?
-  logoUrl         String?         @map("logo_url")
-  plan            TenantPlan      @default(STARTER)
-  status          TenantStatus    @default(TRIAL)
-  trialEndsAt     DateTime?       @map("trial_ends_at")
-  billingEmail    String?         @map("billing_email")
-  maxEmployees    Int             @default(100) @map("max_employees")
-  storageProvider StorageProvider @default(LOCAL) @map("storage_provider")
-  s3Bucket        String?         @map("s3_bucket")
-  s3Region        String?         @map("s3_region")
-  createdAt       DateTime        @default(now()) @map("created_at")
-  updatedAt       DateTime        @updatedAt @map("updated_at")
-
-  users              User[]
-  clients            Client[]
-  employees          Employee[]
-  tenders            Tender[]
-  auditLogs          AuditLog[]
-  complianceDocs     ComplianceDocument[]
-  alerts             ComplianceAlert[]
-  pfFilings          PFFilingRecord[]
-  esicFilings        ESICFilingRecord[]
-  payComponents      PayComponent[]
-  salaryStructures   SalaryStructure[]
-  esicPeriods        ESICPeriod[]
-  payrollRuns        PayrollRun[]
-  invoices           Invoice[]
-  ptConfigs          ProfessionalTaxConfig[]
-  invoiceSequences   InvoiceSequence[]
-
-  @@map("tenants")
-}
-
-// ── USER ──────────────────────────────────────────────────────────
-
-model User {
-  id           String    @id @default(uuid())
-  tenantId     String?   @map("tenant_id")
-  name         String
-  email        String    @unique
-  passwordHash String    @map("password_hash")
-  role         UserRole  @default(HR_MANAGER)
-  phone        String?
-  isActive     Boolean   @default(true) @map("is_active")
-  lastLogin    DateTime? @map("last_login")
-  lastIp       String?   @map("last_ip")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-
-  tenant            Tenant?             @relation(fields: [tenantId], references: [id])
-  payrollRuns       PayrollRun[]
-  uploadedDocs      ComplianceDocument[]
-  auditLogs         AuditLog[]
-  tendersSupervised TenderEmployee[]    @relation("SupervisorRelation")
-  disbursements     PaymentDisbursement[]
-
-  @@index([tenantId])
-  @@map("users")
-}
-
-// ── CLIENT ────────────────────────────────────────────────────────
-
-model Client {
-  id        String   @id @default(uuid())
-  tenantId  String   @map("tenant_id")
-  name      String
-  shortName String?  @map("short_name")
-  gstin     String?
-  address   String?
-  state     String?
-  stateCode String?  @map("state_code")
-  phone     String?
-  email     String?
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  tenant  Tenant   @relation(fields: [tenantId], references: [id])
-  tenders Tender[]
-
-  @@index([tenantId])
-  @@map("clients")
-}
-
-// ── TENDER ────────────────────────────────────────────────────────
-
-model Tender {
-  id                String       @id @default(uuid())
-  tenantId          String       @map("tenant_id")
-  clientId          String       @map("client_id")
-  name              String
-  code              String?
-  location          String?
-  startDate         DateTime     @map("start_date")
-  endDate           DateTime     @map("end_date")
-  status            TenderStatus @default(ACTIVE)
-  poNumber          String?      @map("po_number")
-  workOrder         String?      @map("work_order")
-  description       String?
-  salaryStructureId String?      @map("salary_structure_id")
-  createdAt         DateTime     @default(now()) @map("created_at")
-  updatedAt         DateTime     @updatedAt @map("updated_at")
-
-  tenant                 Tenant                    @relation(fields: [tenantId], references: [id])
-  client                 Client                    @relation(fields: [clientId], references: [id])
-  salaryStructure        SalaryStructure?          @relation(fields: [salaryStructureId], references: [id])
-  legacySalaryStructures TenderSalaryStructure[]
-  employees              TenderEmployee[]
-  payrollRuns            PayrollRun[]
-  invoices               Invoice[]
-  complianceDocs         ComplianceDocument[]
-  tenderDocs             TenderDocument[]
-  alerts                 ComplianceAlert[]
-  manpowerRequirements   ManpowerRequirement[]
-  billingConfig          BillingConfig?
-  componentOverrides     TenderComponentOverride[] // NEW v3.1
-
-  @@unique([tenantId, code])
-  @@index([tenantId])
-  @@map("tenders")
-}
-
-// ══════════════════════════════════════════════════════════════════
-// BILLING DOMAIN
-// ══════════════════════════════════════════════════════════════════
-
-model BillingConfig {
-  id                   String   @id @default(uuid())
-  tenderId             String   @unique @map("tender_id")
-  gstMode              GstMode  @default(REVERSE_CHARGE) @map("gst_mode")
-  cgstRate             Float    @default(0.09) @map("cgst_rate")
-  sgstRate             Float    @default(0.09) @map("sgst_rate")
-  igstRate             Float    @default(0) @map("igst_rate")
-  serviceChargeRate    Float    @default(0.10) @map("service_charge_rate")
-  includeServiceCharge Boolean  @default(true) @map("include_service_charge")
-  invoicePrefix        String   @default("INV") @map("invoice_prefix")
-  sacCode              String   @default("998525") @map("sac_code")
-  paymentTermsDays     Int      @default(30) @map("payment_terms_days")
-  notes                String?
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
-
-  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
-
-  @@map("billing_configs")
-}
-
-model ManpowerRequirement {
-  id            String    @id @default(uuid())
-  tenderId      String    @map("tender_id")
-  tenantId      String    @map("tenant_id")
-  categoryCode  String    @map("category_code")
-  categoryName  String    @map("category_name")
-  requiredPosts Int       @map("required_posts")
-  monthlyRate   Float     @map("monthly_rate")
-  effectiveFrom DateTime  @map("effective_from")
-  effectiveTo   DateTime? @map("effective_to")
-  isActive      Boolean   @default(true) @map("is_active")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-
-  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
-
-  @@index([tenderId])
-  @@index([tenantId])
-  @@map("manpower_requirements")
-}
-
-model Invoice {
-  id            String        @id @default(uuid())
-  tenantId      String        @map("tenant_id")
-  tenderId      String        @map("tender_id")
-  invoiceNo     String        @map("invoice_no")
-  month         Int
-  year          Int
-  periodStart   DateTime      @map("period_start")
-  periodEnd     DateTime      @map("period_end")
-  subtotal      Float         @default(0)
-  serviceCharge Float         @default(0) @map("service_charge")
-  taxableValue  Float         @default(0) @map("taxable_value")
-  cgst          Float         @default(0)
-  sgst          Float         @default(0)
-  igst          Float         @default(0)
-  grandTotal    Float         @default(0) @map("grand_total")
-  gstMode       GstMode       @map("gst_mode")
-  status        InvoiceStatus @default(DRAFT)
-  paidOn        DateTime?     @map("paid_on")
-  paidAmount    Float?        @map("paid_amount")
-  notes         String?
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
-
-  tenant    Tenant            @relation(fields: [tenantId], references: [id])
-  tender    Tender            @relation(fields: [tenderId], references: [id])
-  lineItems InvoiceLineItem[]
-
-  @@unique([tenantId, invoiceNo])
-  @@index([tenantId])
-  @@index([tenderId, month, year])
-  @@map("invoices")
-}
-
-model InvoiceLineItem {
-  id            String   @id @default(uuid())
-  invoiceId     String   @map("invoice_id")
-  categoryCode  String   @map("category_code")
-  categoryName  String   @map("category_name")
-  requiredPosts Int      @map("required_posts")
-  monthlyRate   Float    @map("monthly_rate")
-  workingDays   Int      @map("working_days")
-  standardDays  Int      @map("standard_days")
-  amount        Float
-  sacCode       String   @map("sac_code")
-  displayOrder  Int      @default(0) @map("display_order")
-  createdAt     DateTime @default(now()) @map("created_at")
-
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-
-  @@index([invoiceId])
-  @@map("invoice_line_items")
-}
-
-model InvoiceSequence {
-  id       String @id @default(uuid())
-  tenantId String @map("tenant_id")
-  prefix   String
-  fy       String
-  lastSeq  Int    @default(0) @map("last_seq")
-
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-
-  @@unique([tenantId, prefix, fy])
-  @@map("invoice_sequences")
-}
-
-// ══════════════════════════════════════════════════════════════════
-// PAYROLL DOMAIN
-// ══════════════════════════════════════════════════════════════════
-
-model TenderSalaryStructure {
-  id            String   @id @default(uuid())
-  tenderId      String   @map("tender_id")
-  rank          String
-  basicSalary   Float    @map("basic_salary")
-  vda           Float    @default(0)
-  hraType       String   @default("percentage") @map("hra_type")
-  hraValue      Float    @default(0.08) @map("hra_value")
-  hraMinimum    Float    @default(1800) @map("hra_minimum")
-  washingRate   Float    @default(0.03) @map("washing_rate")
-  bonusRate     Float    @default(0.0833) @map("bonus_rate")
-  bonusEnabled  Boolean  @default(true) @map("bonus_enabled")
-  uniformRate   Float    @default(0.05) @map("uniform_rate")
-  pfRule        PFRule   @default(CAPPED) @map("pf_rule")
-  pfCap         Float    @default(15000) @map("pf_cap")
-  pfEERate      Float    @default(0.12) @map("pf_ee_rate")
-  pfERRate      Float    @default(0.12) @map("pf_er_rate")
-  esicEnabled   Boolean  @default(true) @map("esic_enabled")
-  esicThreshold Float    @default(21000) @map("esic_threshold")
-  esicEERate    Float    @default(0.0075) @map("esic_ee_rate")
-  esicERRate    Float    @default(0.0325) @map("esic_er_rate")
-  baseDivisor   Int      @default(26) @map("base_divisor")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
-
-  @@unique([tenderId, rank])
-  @@map("tender_salary_structures")
-}
-
-model SalaryStructure {
-  id          String   @id @default(uuid())
-  tenantId    String   @map("tenant_id")
-  name        String
-  rank        String?
-  description String?
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  tenant     Tenant                     @relation(fields: [tenantId], references: [id])
-  components SalaryStructureComponent[]
-  tenders    Tender[]
-
-  @@index([tenantId])
-  @@map("salary_structures")
-}
-
-model PayComponent {
-  id           String          @id @default(uuid())
-  tenantId     String          @map("tenant_id")
-  name         String
-  code         String
-  type         ComponentType
-  isStatutory  Boolean         @default(false) @map("is_statutory")
-  isActive     Boolean         @default(true) @map("is_active")
-  displayOrder Int             @default(0) @map("display_order")
-  description  String?
-  nature       ComponentNature @default(EARNING) // NEW v3.1
-  createdAt    DateTime        @default(now()) @map("created_at")
-  updatedAt    DateTime        @updatedAt @map("updated_at")
-
-  tenant              Tenant                     @relation(fields: [tenantId], references: [id])
-  structureComponents SalaryStructureComponent[]
-  rowComponents       PayrollRowComponent[]
-
-  @@unique([tenantId, code])
-  @@index([tenantId])
-  @@map("pay_components")
-}
-
-model SalaryStructureComponent {
-  id                String           @id @default(uuid())
-  salaryStructureId String           @map("salary_structure_id")
-  componentId       String           @map("component_id")
-  calculationType   CalculationType  @map("calculation_type")
-  value             Float?
-  formula           String?
-  threshold         Float?
-  thresholdBonus    Float?           @map("threshold_bonus")
-  isActive          Boolean          @default(true) @map("is_active")
-  natureOverride    ComponentNature? @map("nature_override") // NEW v3.1
-
-  salaryStructure SalaryStructure           @relation(fields: [salaryStructureId], references: [id], onDelete: Cascade)
-  component       PayComponent              @relation(fields: [componentId], references: [id])
-  tenderOverrides TenderComponentOverride[] // NEW v3.1
-
-  @@unique([salaryStructureId, componentId])
-  @@map("salary_structure_components")
-}
-
-// NEW v3.1 — per-tender rate/toggle overrides
-// A row only exists when a tender deviates from structure default
-// If no row → use SalaryStructureComponent value
-model TenderComponentOverride {
-  id                    String   @id @default(uuid())
-  tenderId              String   @map("tender_id")
-  salaryStructureCompId String   @map("salary_structure_comp_id")
-  tenantId              String   @map("tenant_id")
-  isEnabled             Boolean? @map("is_enabled")
-  valueOverride         Float?   @map("value_override")
-  formulaOverride       String?  @map("formula_override")
-  notes                 String?
-  createdAt             DateTime @default(now()) @map("created_at")
-  updatedAt             DateTime @updatedAt @map("updated_at")
-
-  tender        Tender                   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
-  structureComp SalaryStructureComponent @relation(fields: [salaryStructureCompId], references: [id], onDelete: Cascade)
-
-  @@unique([tenderId, salaryStructureCompId])
-  @@index([tenantId])
-  @@map("tender_component_overrides")
-}
-
-model PayrollRun {
-  id                 String        @id @default(uuid())
-  tenantId           String        @map("tenant_id")
-  tenderId           String        @map("tender_id")
-  month              Int
-  year               Int
-  status             PayrollStatus @default(DRAFT)
-  totalGross         Float         @default(0) @map("total_gross")
-  totalNet           Float         @default(0) @map("total_net")
-  totalPFEE          Float         @default(0) @map("total_pf_ee")
-  totalPFER          Float         @default(0) @map("total_pf_er")
-  totalESIC          Float         @default(0) @map("total_esic")
-  totalPT            Float         @default(0) @map("total_pt")
-  // NEW v3.1 — layered cost summary
-  totalProvisions    Float         @default(0) @map("total_provisions")
-  totalTenderCosts   Float         @default(0) @map("total_tender_costs")
-  totalEmployerCosts Float         @default(0) @map("total_employer_costs")
-  totalCostToClient  Float         @default(0) @map("total_cost_to_client")
-  runBy              String        @map("run_by")
-  lockedAt           DateTime?     @map("locked_at")
-  lockedBy           String?       @map("locked_by")
-  notes              String?
-  createdAt          DateTime      @default(now()) @map("created_at")
-  updatedAt          DateTime      @updatedAt @map("updated_at")
-
-  tenant    Tenant       @relation(fields: [tenantId], references: [id])
-  tender    Tender       @relation(fields: [tenderId], references: [id])
-  runByUser User         @relation(fields: [runBy], references: [id])
-  rows      PayrollRow[]
-
-  @@unique([tenderId, month, year])
-  @@index([tenantId])
-  @@map("payroll_runs")
-}
-
-model PayrollRow {
-  id              String   @id @default(uuid())
-  runId           String   @map("run_id")
-  employeeId      String   @map("employee_id")
-  attendanceId    String?  @map("attendance_id")
-  rank            String?
-  workDays        Int      @default(0) @map("work_days")
-  extraDutyDays   Int      @default(0) @map("extra_duty_days")
-  isSplitRow      Boolean  @default(false) @map("is_split_row")
-
-  // Old engine snapshot fields (nullable for component engine rows)
-  payableBasic  Float? @map("payable_basic")
-  vdaPayable    Float? @map("vda_payable")
-  hra           Float?
-  washingAllow  Float? @map("washing_allow")
-  bonus         Float?
-  uniformAllow  Float? @map("uniform_allow")
-  extraDutyAmt  Float? @map("extra_duty_amt")
-
-  // Totals
-  grossEarnings   Float @default(0) @map("gross_earnings")
-  totalDeductions Float @default(0) @map("total_deductions")
-  netPay          Float @default(0) @map("net_pay")
-
-  // Statutory — for challan
-  pfWage      Float @default(0) @map("pf_wage")
-  pfEE        Float @default(0) @map("pf_ee")
-  pfER        Float @default(0) @map("pf_er")
-  erEPF       Float @default(0) @map("er_epf")
-  erEPS       Float @default(0) @map("er_eps")
-  edli        Float @default(0)
-  adminCharge Float @default(0) @map("admin_charge")
-  esicEE      Float @default(0) @map("esic_ee")
-  esicER      Float @default(0) @map("esic_er")
-  pt          Float @default(0)
-
-  // NEW v3.1 — Layer 3: Provisions
-  bonusProvision     Float @default(0) @map("bonus_provision")
-  gratuityProvision  Float @default(0) @map("gratuity_provision")
-  leaveWageProvision Float @default(0) @map("leave_wage_provision")
-
-  // NEW v3.1 — Layer 4: Tender costs
-  uniformCost  Float @default(0) @map("uniform_cost")
-  washingCost  Float @default(0) @map("washing_cost")
-  relieverCost Float @default(0) @map("reliever_cost")
-
-  // NEW v3.1 — Layer 2 summary
-  totalEmployerCost Float @default(0) @map("total_employer_cost")
-
-  createdAt DateTime @default(now()) @map("created_at")
-
-  run        PayrollRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
-  employee   Employee            @relation(fields: [employeeId], references: [id])
-  attendance Attendance?         @relation(fields: [attendanceId], references: [id])
-  components PayrollRowComponent[]
-
-  @@index([runId])
-  @@index([employeeId])
-  @@map("payroll_rows")
-}
-
-model PayrollRowComponent {
-  id              String          @id @default(uuid())
-  rowId           String          @map("row_id")
-  componentId     String          @map("component_id")
-  componentName   String          @map("component_name")
-  componentCode   String          @map("component_code")
-  type            ComponentType
-  calculationType CalculationType @map("calculation_type")
-  computedValue   Float           @default(0) @map("computed_value")
-
-  row       PayrollRow   @relation(fields: [rowId], references: [id], onDelete: Cascade)
-  component PayComponent @relation(fields: [componentId], references: [id])
-
-  @@index([rowId])
-  @@map("payroll_row_components")
-}
-
-// ── EMPLOYEE ──────────────────────────────────────────────────────
-
-model Employee {
-  id          String         @id @default(uuid())
-  tenantId    String         @map("tenant_id")
-  sr          Int?
-  name        String
-  fatherName  String?        @map("father_name")
-  dob         DateTime?
-  gender      String?
-  phone       String?
-  email       String?
-  address     String?
-  aadhaar     String?
-  pan         String?
-  uan         String?
-  pfNumber    String?        @map("pf_number")
-  esicNumber  String?        @map("esic_number")
-  bankAccount String?        @map("bank_account")
-  ifscCode    String?        @map("ifsc_code")
-  bankName    String?        @map("bank_name")
-  status      EmployeeStatus @default(ACTIVE)
-  photoUrl    String?        @map("photo_url")
-  createdAt   DateTime       @default(now()) @map("created_at")
-  updatedAt   DateTime       @updatedAt @map("updated_at")
-
-  tenant            Tenant              @relation(fields: [tenantId], references: [id])
-  tenderAssignments TenderEmployee[]
-  documents         EmployeeDocument[]
-  payrollRows       PayrollRow[]
-  replacedBy        Replacement[]       @relation("ExitedEmployee")
-  replacements      Replacement[]       @relation("ReplacementEmployee")
-  esicPeriods       ESICPeriod[]
-  disbursements     PaymentDisbursement[]
-
-  @@unique([tenantId, uan])
-  @@index([tenantId])
-  @@map("employees")
-}
-
-model TenderEmployee {
-  id            String      @id @default(uuid())
-  tenderId      String      @map("tender_id")
-  employeeId    String      @map("employee_id")
-  rank          String
-  joiningDate   DateTime    @map("joining_date")
-  exitDate      DateTime?   @map("exit_date")
-  exitReason    ExitReason? @map("exit_reason")
-  exitNote      String?     @map("exit_note")
-  pfExitFiled   Boolean     @default(false) @map("pf_exit_filed")
-  esicExitFiled Boolean     @default(false) @map("esic_exit_filed")
-  supervisorId  String?     @map("supervisor_id")
-  isActive      Boolean     @default(true) @map("is_active")
-  isReliever    Boolean     @default(false) @map("is_reliever")
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @updatedAt @map("updated_at")
-
-  tender     Tender       @relation(fields: [tenderId], references: [id])
-  employee   Employee     @relation(fields: [employeeId], references: [id])
-  supervisor User?        @relation("SupervisorRelation", fields: [supervisorId], references: [id])
-  attendance Attendance[]
-
-  @@map("tender_employees")
-}
-
-// ── ATTENDANCE ────────────────────────────────────────────────────
-
-model Attendance {
-  id               String   @id @default(uuid())
-  tenantId         String   @map("tenant_id")
-  tenderEmployeeId String   @map("tender_employee_id")
-  month            Int
-  year             Int
-  presentDays      Int      @default(0) @map("present_days")
-  extraDutyDays    Int      @default(0) @map("extra_duty_days")
-  splitDays        Int      @default(0) @map("split_days")
-  splitRank        String?  @map("split_rank")
-  otHours          Float    @default(0) @map("ot_hours")
-  nightShifts      Float    @default(0) @map("night_shifts")
-  dailyData        Json?    @map("daily_data")
-  isLocked         Boolean  @default(false) @map("is_locked")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-
-  tenderEmployee TenderEmployee @relation(fields: [tenderEmployeeId], references: [id])
-  payrollRows    PayrollRow[]
-
-  @@unique([tenderEmployeeId, month, year])
-  @@index([tenantId])
-  @@map("attendance")
-}
-
-// ── PAYMENT DISBURSEMENT ──────────────────────────────────────────
-
-model PaymentDisbursement {
-  id            String             @id @default(uuid())
-  tenantId      String             @map("tenant_id")
-  runId         String             @map("run_id")
-  employeeId    String             @map("employee_id")
-  netPay        Float              @map("net_pay")
-  bankAccount   String?            @map("bank_account")
-  ifscCode      String?            @map("ifsc_code")
-  bankName      String?            @map("bank_name")
-  status        DisbursementStatus @default(PENDING)
-  utrNo         String?            @map("utr_no")
-  transferredAt DateTime?          @map("transferred_at")
-  transferredBy String?            @map("transferred_by")
-  failureReason String?            @map("failure_reason")
-  createdAt     DateTime           @default(now()) @map("created_at")
-  updatedAt     DateTime           @updatedAt @map("updated_at")
-
-  employee    Employee @relation(fields: [employeeId], references: [id])
-  transferrer User?    @relation(fields: [transferredBy], references: [id])
-
-  @@unique([runId, employeeId])
-  @@index([tenantId])
-  @@map("payment_disbursements")
-}
-
-// ── PROFESSIONAL TAX CONFIG ───────────────────────────────────────
-
-model ProfessionalTaxConfig {
-  id        String   @id @default(uuid())
-  tenantId  String   @map("tenant_id")
-  state     String
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  tenant Tenant                @relation(fields: [tenantId], references: [id])
-  slabs  ProfessionalTaxSlab[]
-
-  @@unique([tenantId, state])
-  @@map("professional_tax_configs")
-}
-
-model ProfessionalTaxSlab {
-  id        String  @id @default(uuid())
-  configId  String  @map("config_id")
-  minSalary Float   @map("min_salary")
-  maxSalary Float?  @map("max_salary")
-  ptAmount  Float   @map("pt_amount")
-
-  config ProfessionalTaxConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
-
-  @@index([configId])
-  @@map("professional_tax_slabs")
-}
-
-// ── ESIC PERIOD ───────────────────────────────────────────────────
-
-model ESICPeriod {
-  id           String    @id @default(uuid())
-  tenantId     String    @map("tenant_id")
-  employeeId   String    @map("employee_id")
-  periodStart  DateTime  @map("period_start")
-  periodEnd    DateTime  @map("period_end")
-  eligible     Boolean
-  grossAtStart Float?    @map("gross_at_start")
-  exitDate     DateTime? @map("exit_date")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-
-  tenant   Tenant   @relation(fields: [tenantId], references: [id])
-  employee Employee @relation(fields: [employeeId], references: [id])
-
-  @@unique([tenantId, employeeId, periodStart])
-  @@index([tenantId])
-  @@index([employeeId])
-  @@map("esic_periods")
-}
-
-// ── COMPLIANCE ────────────────────────────────────────────────────
-
-model ComplianceDocument {
-  id              String            @id @default(uuid())
-  tenantId        String            @map("tenant_id")
-  tenderId        String?           @map("tender_id")
-  docType         ComplianceDocType
-  name            String
-  issueDate       DateTime?         @map("issue_date")
-  expiryDate      DateTime?         @map("expiry_date")
-  fileKey         String?           @map("file_key")
-  fileName        String?           @map("file_name")
-  fileSize        Int?              @map("file_size")
-  storageProvider StorageProvider   @default(LOCAL) @map("storage_provider")
-  notes           String?
-  uploadedBy      String?           @map("uploaded_by")
-  alert90Sent     Boolean           @default(false) @map("alert_90_sent")
-  alert60Sent     Boolean           @default(false) @map("alert_60_sent")
-  alert30Sent     Boolean           @default(false) @map("alert_30_sent")
-  isActive        Boolean           @default(true) @map("is_active")
-  createdAt       DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @updatedAt @map("updated_at")
-
-  tenant         Tenant  @relation(fields: [tenantId], references: [id])
-  tender         Tender? @relation(fields: [tenderId], references: [id])
-  uploadedByUser User?   @relation(fields: [uploadedBy], references: [id])
-
-  @@index([tenantId])
-  @@map("compliance_documents")
-}
-
-model ComplianceAlert {
-  id         String        @id @default(uuid())
-  tenantId   String        @map("tenant_id")
-  tenderId   String?       @map("tender_id")
-  entityType String        @map("entity_type")
-  entityId   String        @map("entity_id")
-  alertType  AlertType     @map("alert_type")
-  severity   AlertSeverity
-  title      String
-  message    String
-  isResolved Boolean       @default(false) @map("is_resolved")
-  resolvedAt DateTime?     @map("resolved_at")
-  resolvedBy String?       @map("resolved_by")
-  createdAt  DateTime      @default(now()) @map("created_at")
-
-  tenant Tenant  @relation(fields: [tenantId], references: [id])
-  tender Tender? @relation(fields: [tenderId], references: [id])
-
-  @@index([tenantId])
-  @@map("compliance_alerts")
-}
-
-model TenderDocument {
-  id              String          @id @default(uuid())
-  tenderId        String          @map("tender_id")
-  category        String
-  name            String
-  fileName        String          @map("file_name")
-  fileKey         String          @map("file_key")
-  fileSize        Int?            @map("file_size")
-  mimeType        String?         @map("mime_type")
-  storageProvider StorageProvider @default(LOCAL) @map("storage_provider")
-  uploadedBy      String?         @map("uploaded_by")
-  createdAt       DateTime        @default(now()) @map("created_at")
-
-  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
-
-  @@map("tender_documents")
-}
-
-model Replacement {
-  id                    String   @id @default(uuid())
-  tenderId              String   @map("tender_id")
-  exitedEmployeeId      String   @map("exited_employee_id")
-  replacementEmployeeId String   @map("replacement_employee_id")
-  replacedOn            DateTime @map("replaced_on")
-  note                  String?
-  createdAt             DateTime @default(now()) @map("created_at")
-
-  exitedEmployee      Employee @relation("ExitedEmployee", fields: [exitedEmployeeId], references: [id])
-  replacementEmployee Employee @relation("ReplacementEmployee", fields: [replacementEmployeeId], references: [id])
-
-  @@map("replacements")
-}
-
-model EmployeeDocument {
-  id              String          @id @default(uuid())
-  employeeId      String          @map("employee_id")
-  docType         String          @map("doc_type")
-  fileName        String          @map("file_name")
-  fileKey         String          @map("file_key")
-  fileSize        Int?            @map("file_size")
-  mimeType        String?         @map("mime_type")
-  storageProvider StorageProvider @default(LOCAL) @map("storage_provider")
-  verified        Boolean         @default(false)
-  uploadedAt      DateTime        @default(now()) @map("uploaded_at")
-
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-
-  @@map("employee_documents")
-}
-
-// ── AUDIT LOG ─────────────────────────────────────────────────────
-
-model AuditLog {
-  id         String      @id @default(uuid())
-  tenantId   String?     @map("tenant_id")
-  userId     String      @map("user_id")
-  action     AuditAction
-  entityType String      @map("entity_type")
-  entityId   String?     @map("entity_id")
-  oldValues  Json?       @map("old_values")
-  newValues  Json?       @map("new_values")
-  metadata   Json?
-  ipAddress  String?     @map("ip_address")
-  userAgent  String?     @map("user_agent")
-  createdAt  DateTime    @default(now()) @map("created_at")
-
-  tenant Tenant? @relation(fields: [tenantId], references: [id])
-  user   User    @relation(fields: [userId], references: [id])
-
-  @@index([tenantId, createdAt(sort: Desc)])
-  @@index([entityType, entityId])
-  @@map("audit_logs")
-}
-
-// ── FILING RECORDS ────────────────────────────────────────────────
-
-model PFFilingRecord {
-  id        String   @id @default(uuid())
-  tenantId  String   @map("tenant_id")
-  tenderId  String   @map("tender_id")
-  month     Int
-  year      Int
-  challanNo String?  @map("challan_no")
-  amount    Float
-  filedDate DateTime @map("filed_date")
-  notes     String?
-  createdAt DateTime @default(now()) @map("created_at")
-
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-
-  @@index([tenantId])
-  @@map("pf_filing_records")
-}
-
-model ESICFilingRecord {
-  id        String   @id @default(uuid())
-  tenantId  String   @map("tenant_id")
-  tenderId  String   @map("tender_id")
-  month     Int
-  year      Int
-  challanNo String?  @map("challan_no")
-  amount    Float
-  filedDate DateTime @map("filed_date")
-  notes     String?
-  createdAt DateTime @default(now()) @map("created_at")
-
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-
-  @@index([tenantId])
-  @@map("esic_filing_records")
+  EARNING
+  DEDUCTION
+  EMPLOYER_COST
+  PROVISION
+  TENDER_COST
 }
