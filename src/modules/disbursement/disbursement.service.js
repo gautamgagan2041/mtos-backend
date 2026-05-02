@@ -60,8 +60,9 @@ async function markFailed(disbursementId, tenantId, failureReason) {
 /**
  * Bulk mark all pending as transferred
  */
-async function bulkMarkTransferred(runId, tenantId, transferredBy) {
-  const result = await repository.bulkMarkTransferred(runId, tenantId, transferredBy);
+async function bulkMarkTransferred(runId, tenantId, transferredBy, batchRef) {
+  const ref = batchRef || ('BULK-' + runId.slice(-8).toUpperCase() + '-' + Date.now());
+  const result = await repository.bulkMarkTransferred(runId, tenantId, transferredBy, ref);
   return {
     success: true,
     message: `${result.count} payments marked as transferred`,

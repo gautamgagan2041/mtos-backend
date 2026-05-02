@@ -109,13 +109,14 @@ async function markFailed(disbursementId, tenantId, failureReason) {
  * Mark all pending disbursements as transferred in bulk
  * Used for bulk bank transfer confirmation
  */
-async function bulkMarkTransferred(runId, tenantId, transferredBy) {
+async function bulkMarkTransferred(runId, tenantId, transferredBy, batchRef) {
   return prisma.paymentDisbursement.updateMany({
     where: { runId, tenantId, status: 'PENDING' },
     data: {
       status:        'TRANSFERRED',
       transferredAt: new Date(),
       transferredBy,
+      utrNo:         batchRef,
     },
   });
 }

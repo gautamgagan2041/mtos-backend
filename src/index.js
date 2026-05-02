@@ -257,6 +257,12 @@ const server = app.listen(PORT, async () => {
 // ── Graceful Shutdown ─────────────────────────────────────────────
 
 async function shutdown(signal) {
+  try {
+    const { payrollWorker } = require('./jobs/payroll.job');
+    const { complianceWorker } = require('./jobs/compliance.job');
+    if (payrollWorker) await payrollWorker.close();
+    if (complianceWorker) await complianceWorker.close();
+  } catch (e) { }
   logger.info(`[Server] ${signal} received — graceful shutdown starting...`);
 
   // Stop accepting new connections

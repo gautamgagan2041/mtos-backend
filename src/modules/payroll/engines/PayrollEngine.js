@@ -296,10 +296,14 @@ async function _executePayroll(tenantId, tenderId, month, year, runByUserId) {
   const loanMap = Object.fromEntries(loans.map(l => [l.employeeId, l]));
 
   const rowsToSave = [];
+  const skippedEmployees = [];
 
   for (const te of tender.employees) {
     const attendance = te.attendance[0];
-    if (!attendance) continue; // Skip employees with no attendance record
+    if (!attendance) {
+      skippedEmployees.push({ employeeId: te.employeeId, name: te.employee?.name, reason: 'No attendance record' });
+      continue;
+    }
 
     const components = tender.salaryStructure?.components ?? [];
     if (components.length === 0) continue; // No salary structure assigned
@@ -382,12 +386,17 @@ async function _executePayroll(tenantId, tenderId, month, year, runByUserId) {
     tenantId, tenderId, month, year, runByUserId, rowsToSave, totals
   );
 
-  // ── Update loan balances after successful payroll
-  await _updateLoanBalances(loanMap, rowsToSave);
+  // -- Update loan balances after successful payroll (non-critical, retry-safe)
+  try {
+    await _updateLoanBalances(loanMap, rowsToSave);
+  } catch (err) {
+    logger.error('[PayrollEngine] Loan balance update failed (payroll still completed):', err.message);
+  }
 
   return {
     runId:      run.id,
-    rowCount:   rowsToSave.length,
+    rowCount:       rowsToSave.length,
+    skipped:        skippedEmployees,
     totalGross: totals.totalGross,
     totalNet:   totals.totalNet,
     totals,
