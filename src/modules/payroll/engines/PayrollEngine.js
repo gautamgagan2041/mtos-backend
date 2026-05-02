@@ -342,7 +342,7 @@ async function _executePayroll(tenantId, tenderId, month, year, runByUserId) {
       rank:              te.rank,
       workDays:          attendance.presentDays,
       grossEarnings:     result.grossEarnings,
-      totalDeductions:   r2(result.totalDeductions + loanDeduction),
+      totalDeductions:   result.totalDeductions,  // loan kept separate to avoid double-count in cost sheet
       netPay:            finalNetPay,
       // PF
       pfWage:            result.pfWage,

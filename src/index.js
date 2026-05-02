@@ -28,6 +28,11 @@ const prisma         = require('./config/database');
 
 const app = express();
 
+// Ensure upload temp directory exists
+const fs = require('fs');
+const uploadTemp = require('path').join(__dirname, '../uploads/temp');
+fs.mkdirSync(uploadTemp, { recursive: true });
+
 // ── Security Headers ──────────────────────────────────────────────
 
 app.use(helmet({

@@ -197,4 +197,15 @@ async function migratePIIEncryption() {
   console.log(`[Migration] Done. Migrated: ${migrated}, Already encrypted: ${skipped}`);
 }
 
-module.exports = { encrypt, decrypt, encryptPII, decryptPII, maskPII, migratePIIEncryption, PII_FIELDS };
+
+// ── HMAC search token — deterministic, safe for DB lookup ──────
+// Use this for Aadhaar/PAN duplicate checks instead of encrypted ciphertext
+function hmacToken(plainText) {
+  if (!plainText) return null;
+  const key = process.env.ENCRYPTION_KEY; // reuse same key
+  if (!key || key.length !== 64) throw new Error('[Encryption] ENCRYPTION_KEY required for HMAC');
+  return crypto.createHmac('sha256', key).update(String(plainText).trim()).digest('hex');
+}
+
+module.exports = {
+  hmacToken, encrypt, decrypt, encryptPII, decryptPII, maskPII, migratePIIEncryption, PII_FIELDS };

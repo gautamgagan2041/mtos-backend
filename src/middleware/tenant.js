@@ -28,6 +28,19 @@ const resolveTenant = async (req, res, next) => {
         if (!tenant) return next(new ApiError(404, `Tenant not found: ${targetTenantId}`));
         req.tenant   = tenant;
         req.tenantId = tenant.id;
+        // Audit: log SUPER_ADMIN impersonation
+        try {
+          const logger = require('../utils/logger');
+          logger.warn('[Security] SUPER_ADMIN impersonation', {
+            adminId:    req.user.id,
+            adminEmail: req.user.email,
+            tenantId:   tenant.id,
+            tenantName: tenant.name,
+            ip:         req.ip,
+            method:     req.method,
+            path:       req.path,
+          });
+        } catch (e) {}
         return next();
       }
 

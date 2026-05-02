@@ -59,10 +59,12 @@ async function findByUAN(tenantId, uan) {
   return prisma.employee.findFirst({ where: { tenantId, uan } });
 }
 
-async function findByAadhaar(tenantId, aadhaarEncrypted) {
-  if (!aadhaarEncrypted) return null;
-  // NOTE: encrypted field — exact match comparison
-  return prisma.employee.findFirst({ where: { tenantId, aadhaar: aadhaarEncrypted } });
+async function findByAadhaar(tenantId, aadhaarPlain) {
+  if (!aadhaarPlain) return null;
+  // Use HMAC token for deterministic search — AES-GCM random IV makes ciphertext non-searchable
+  const { hmacToken } = require('../../utils/encryption');
+  const token = hmacToken(aadhaarPlain);
+  return prisma.employee.findFirst({ where: { tenantId, aadhaarHmac: token } });
 }
 
 async function create(tenantId, data) {
