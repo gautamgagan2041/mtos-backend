@@ -191,8 +191,28 @@ async function getTransferSheet(runId, tenantId) {
   return { run, transferRows, totalNet };
 }
 
+
+// -- Validate Can Run (used by controller before enqueuing job) --
+async function validateCanRun(tenantId, tenderId, month, year) {
+  const monthNum = parseInt(month);
+  const yearNum  = parseInt(year);
+  if (isNaN(monthNum) || monthNum < 1 || monthNum > 12)
+    throw new Error('Invalid month: ' + month + '. Must be 1-12.');
+  if (isNaN(yearNum) || yearNum < 2020 || yearNum > 2100)
+    throw new Error('Invalid year: ' + year);
+  const existing = await repository.findExistingRun(tenderId, monthNum, yearNum);
+  if (!existing) return { canRun: true };
+  if (existing.status === 'PROCESSING')
+    throw new Error('Payroll run is already in progress for this tender and month.');
+  if (existing.status === 'COMPLETED')
+    throw new Error('Payroll for ' + monthNum + '/' + yearNum + ' is already completed. Delete the existing run before re-running.');
+  if (existing.status === 'LOCKED')
+    throw new Error('Payroll for ' + monthNum + '/' + yearNum + ' is locked and cannot be re-run.');
+  return { canRun: true };
+}
 module.exports = {
   runPayroll,
+  validateCanRun,
   getRunsByTender,
   getRun,
   lockRun,
@@ -200,3 +220,5 @@ module.exports = {
   getPFChallan,
   getTransferSheet,
 };
+
+

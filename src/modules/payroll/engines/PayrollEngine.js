@@ -141,6 +141,7 @@ function calculateComponents(
       case 'FORMULA':
         try {
           value = r2(evaluateFormula(effectiveFormula, {
+          GROSS: grossEarnings,
             ...computed,
             presentDays,
             otHours,

@@ -144,6 +144,7 @@ app.use('/api/relievers',   require('./modules/relievers/relievers.routes'));
 app.use('/api/subscription', require('./modules/subscription/subscription.routes'));
 
 // Existing routes that haven't been refactored yet (Phase 4)
+app.use('/api/dashboard',  require('./routes/dashboard'));
 app.use('/api/clients',     require('./modules/client/client.routes'));
 app.use('/api/compliance',  require('./routes/compliance'));
 app.use('/api/audit',       require('./routes/audit'));

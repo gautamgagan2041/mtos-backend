@@ -44,7 +44,7 @@ async function previewInvoice(tenantId, tenderId, month, year) {
   }
 
   // 4. Run calculation — pure math, no DB
-  const calculation = billingEngine.calculateBilling(requirements, config, month, year);
+  const calculation = billingEngine.generateBilling({ costSummary: requirements, config });
 
   return {
     tender: {
@@ -116,7 +116,7 @@ async function generateInvoice(tenantId, tenderId, month, year, options = {}) {
   }
 
   // 5. Calculate — engine does the math
-  const calculation = billingEngine.calculateBilling(requirements, config, month, year);
+  const calculation = billingEngine.generateBilling({ costSummary: requirements, config });
 
   // 6. Get sequential invoice number
   // Use custom number if provided, else auto-generate

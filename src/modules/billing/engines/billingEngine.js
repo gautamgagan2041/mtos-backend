@@ -62,4 +62,13 @@ function generateBilling({ costSummary, config }) {
   };
 }
 
-module.exports = { generateBilling };
+
+function getFinancialYear(month, year) {
+  const m = parseInt(month);
+  const y = parseInt(year);
+  if (m >= 4) return y + '-' + (y + 1).toString().slice(-2);
+  return (y - 1) + '-' + y.toString().slice(-2);
+}
+
+module.exports = { generateBilling, getFinancialYear };
+

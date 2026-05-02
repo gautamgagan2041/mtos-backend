@@ -47,6 +47,7 @@ model Tenant {
   salaryStructures SalaryStructure[]
   tenders          Tender[]
   users            User[]
+  employeeLoans    EmployeeLoan[]
 
   @@map("tenants")
 }
@@ -487,6 +488,7 @@ model Employee {
   replacedBy        Replacement[]         @relation("ExitedEmployee")
   replacements      Replacement[]         @relation("ReplacementEmployee")
   tenderAssignments TenderEmployee[]
+  loans             EmployeeLoan[]
 
   @@unique([tenantId, uan])
   @@index([tenantId])
@@ -927,4 +929,23 @@ enum ComponentNature {
   EMPLOYER_COST
   PROVISION
   TENDER_COST
+}
+
+model EmployeeLoan {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  employeeId      String    @map("employee_id")
+  amount          Decimal   @db.Decimal(14,2)
+  remainingAmount Decimal   @db.Decimal(14,2) @map("remaining_amount")
+  emiAmount       Decimal   @db.Decimal(14,2) @map("emi_amount")
+  isActive        Boolean   @default(true) @map("is_active")
+  startMonth      Int       @map("start_month")
+  startYear       Int       @map("start_year")
+  description     String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  employee        Employee  @relation(fields: [employeeId], references: [id])
+  tenant          Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@map("employee_loans")
 }

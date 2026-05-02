@@ -166,7 +166,7 @@ async function acquireLock(lockKey, ttlSeconds = 120) {
     // SET key value NX EX ttl — atomic: only sets if not exists
     const result = await client.set(lockKey, lockId, 'EX', ttlSeconds, 'NX');
     if (result === 'OK') return lockId;
-    return null; // Lock already held
+    return null; // null = lock already held
   } catch (err) {
     logger.warn(`[Cache] acquireLock failed for "${lockKey}": ${err.message}`);
     return null;
@@ -198,7 +198,8 @@ async function releaseLock(lockKey, lockId) {
  */
 async function withLock(lockKey, fn, ttlSeconds = 120) {
   const lockId = await acquireLock(lockKey, ttlSeconds);
-  if (!lockId) {
+  if (lockId === false) throw new Error('Redis unavailable - please try again later.');
+  if (lockId === null) {
     throw new Error(
       `Operation already in progress. Another user is running this operation. ` +
       `Please wait and try again.`
@@ -217,3 +218,4 @@ module.exports = {
   acquireLock, releaseLock, withLock,
   keys, TTL,
 };
+

@@ -71,7 +71,7 @@ function calculatePF(
   const pfER = r2(erEPF + erEPS);
 
   const edli        = r2(pfWage * PF_EDLI_RATE);
-  const adminCharge = r2(pfWage * PF_ADMIN_RATE); // no ₹500 here
+  const adminCharge = r2(Math.max(500, pfWage * PF_ADMIN_RATE)); // no ₹500 here
 
   const challanDeposit = r2(pfEE + pfER);
 

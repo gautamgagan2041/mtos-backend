@@ -25,4 +25,4 @@ EXPOSE 5000
 ENV NODE_ENV=production
 
 # Wait for DB then migrate and start
-CMD ["node", "src/index.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node src/index.js"]
