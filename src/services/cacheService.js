@@ -1,183 +1,214 @@
-'use strict';
-
 /**
- * cacheService.js — Redis-backed caching layer
+ * MTOS Cache Service
  *
- * INSTALL:  npm install ioredis
- * ENV:      REDIS_HOST=localhost  REDIS_PORT=6379  REDIS_PASSWORD=
+ * Fixes:
+ *   CRIT-05 — Replace blocking KEYS with non-blocking SCAN cursor iteration
+ *   HIGH-04 — acquireLock distinguishes "lock taken" vs "Redis error"
+ *   LOW-02  — Lock TTL is documented; callers receive structured errors
  *
- * KEY NAMESPACING:
- *   mtos:<tenantId>:<entity>:<id>
- *
- * TTLs are tuned for payroll domain:
- *   Tenant settings:    5 min   (changes on plan upgrade, config changes)
- *   PT config:          60 min  (state slabs rarely change)
- *   Salary structures:  5 min   (can change between payroll runs)
- *   Employee list:      1 min   (changes frequently)
- *   ESIC periods:       1 min   (written during payroll run)
+ * Design contract:
+ *  - getClient() returns the shared ioredis instance; never import ioredis directly.
+ *  - All public functions are async and throw typed errors (code property).
+ *  - scan() is the ONLY way to iterate keys — KEYS is banned in this module.
+ *  - withLock() differentiates three states: ACQUIRED, TAKEN, ERROR.
  */
 
-const Redis  = require('ioredis');
-const logger = require('../utils/logger');
+'use strict';
 
-const TTL = {
-  TENANT:           5   * 60,  // 5 min
-  PT_CONFIG:        60  * 60,  // 60 min
-  SALARY_STRUCTURE: 5   * 60,  // 5 min
-  EMPLOYEE_LIST:    1   * 60,  // 1 min
-  ESIC_PERIODS:     1   * 60,  // 1 min
-  PLAN_FEATURES:    10  * 60,  // 10 min
+// ─── Error types ──────────────────────────────────────────────────────────────
+
+class LockTakenError extends Error {
+  constructor(lockKey) {
+    super(`Distributed lock is held by another process: ${lockKey}`);
+    this.code    = 'LOCK_TAKEN';
+    this.lockKey = lockKey;
+  }
+}
+
+class LockServiceError extends Error {
+  constructor(lockKey, cause) {
+    super(`Redis unavailable while acquiring lock "${lockKey}": ${cause.message}`);
+    this.code    = 'LOCK_SERVICE_UNAVAILABLE';
+    this.lockKey = lockKey;
+    this.cause   = cause;
+  }
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const TTL = Object.freeze({
+  PT_CONFIG:       3600,   // seconds — invalidate when PT slabs updated (MED-04)
+  PAYROLL_LOCK:     300,   // seconds — lock lifetime for payroll run
+  TENDER_DATA:      600,
+  SUBSCRIPTION:    1800,
+  DEFAULT:          300,
+});
+
+const KEY = {
+  payrollLock:  (tenantId, tenderId, month, year) =>
+    `lock:payroll:${tenantId}:${tenderId}:${month}:${year}`,
+  ptConfig:     (tenantId, state) =>
+    `pt:config:${tenantId}:${state}`,
+  tenderData:   (tenantId, tenderId) =>
+    `tender:${tenantId}:${tenderId}`,
+  subscription: (tenantId) =>
+    `subscription:${tenantId}`,
 };
+
+// ─── Singleton client ─────────────────────────────────────────────────────────
 
 let _client = null;
 
+/**
+ * Returns the shared Redis client.
+ * In test environments, callers inject a mock via setClientForTest().
+ */
 function getClient() {
+  if (!_client) {
+    throw new Error(
+      'Redis client not initialised. Call initRedis(config) at startup.'
+    );
+  }
+  return _client;
+}
+
+/**
+ * Initialises the Redis client from a config object.
+ * Should be called once at application startup, after validateSecrets().
+ *
+ * MED-06: password is REQUIRED — startup fails if omitted.
+ */
+function initRedis(redisConfig) {
   if (_client) return _client;
 
+  // Dynamic require so tests can mock without real ioredis installed
+  const Redis = require('ioredis');
+
+  if (!redisConfig.password) {
+    throw new Error(
+      'MED-06: Redis password is required. Set REDIS_PASSWORD in environment. ' +
+      'Never run Redis without authentication in any environment.'
+    );
+  }
+
   _client = new Redis({
-    host:     process.env.REDIS_HOST     || 'localhost',
-    port:     parseInt(process.env.REDIS_PORT || '6379'),
-    password: process.env.REDIS_PASSWORD || undefined,
-    tls: process.env.REDIS_TLS === 'true' ? {} : undefined,
-    db:       parseInt(process.env.REDIS_DB   || '0'),
+    host:            redisConfig.host,
+    port:            redisConfig.port,
+    password:        redisConfig.password,
+    tls:             redisConfig.tls ? {} : undefined,
+    enableReadyCheck: true,
     maxRetriesPerRequest: 3,
-    enableOfflineQueue:   false,
-    // Graceful degradation: if Redis is down, don't break the app
-    reconnectOnError: (err) => {
-      logger.error(`[Cache] Redis error: ${err.message}`);
-      return true;
-    },
-    lazyConnect: true,
+    lazyConnect:     false,
+    connectTimeout:  5000,
   });
 
   _client.on('error', (err) => {
-    logger.error(`[Cache] Redis connection error: ${err.message}`);
-  });
-
-  _client.on('connect', () => {
-    logger.info('[Cache] Redis connected');
+    // Structured log — do NOT use console.error (LOW-01)
+    const logger = _getLogger();
+    logger.error({ err, component: 'redis' }, 'Redis connection error');
   });
 
   return _client;
 }
 
-/**
- * get — retrieve a cached value
- * Returns null if not found or Redis is unavailable
- */
-async function get(key) {
-  try {
-    const raw = await getClient().get(key);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch (err) {
-    logger.warn(`[Cache] GET failed for key "${key}": ${err.message}`);
-    return null; // Graceful degradation — fall through to DB
-  }
-}
+/** @internal — for tests only */
+function _setClientForTest(mockClient) { _client = mockClient; }
+function _clearClientForTest()         { _client = null; }
+
+// ─── SCAN-based key iteration (replaces KEYS — fixes CRIT-05) ─────────────────
 
 /**
- * set — store a value with TTL
- * Fails silently if Redis is unavailable (DB remains source of truth)
- */
-async function set(key, value, ttl = 60) {
-  try {
-    await getClient().setex(key, ttl, JSON.stringify(value));
-  } catch (err) {
-    logger.warn(`[Cache] SET failed for key "${key}": ${err.message}`);
-  }
-}
-
-/**
- * del — invalidate a key or pattern
- */
-async function del(keyOrPattern) {
-  try {
-    if (keyOrPattern.includes('*')) {
-      const keys = await getClient().keys(keyOrPattern);
-      if (keys.length > 0) {
-        await getClient().del(...keys);
-      }
-      return keys.length;
-    }
-    return await getClient().del(keyOrPattern);
-  } catch (err) {
-    logger.warn(`[Cache] DEL failed for "${keyOrPattern}": ${err.message}`);
-    return 0;
-  }
-}
-
-/**
- * getOrSet — cache-aside pattern
- * Tries cache first. On miss, calls fn(), caches result, returns it.
- * On Redis failure, calls fn() directly (transparent fallback).
- */
-async function getOrSet(key, fn, ttl = 60) {
-  const cached = await get(key);
-  if (cached !== null) return cached;
-
-  const value = await fn();
-  if (value !== null && value !== undefined) {
-    await set(key, value, ttl);
-  }
-  return value;
-}
-
-// ── Domain-specific cache helpers ─────────────────────────────────
-
-const keys = {
-  tenant:          (tenantId)                  => `mtos:${tenantId}:tenant`,
-  ptConfig:        (tenantId, state)           => `mtos:${tenantId}:pt:${state}`,
-  salaryStructure: (tenantId, structureId)     => `mtos:${tenantId}:ss:${structureId}`,
-  employeeList:    (tenantId)                  => `mtos:${tenantId}:employees:active`,
-  esicPeriods:     (tenantId, month, year)     => `mtos:${tenantId}:esic:${year}:${month}`,
-  planFeatures:    (tenantId)                  => `mtos:${tenantId}:plan`,
-  tenderAll:       (tenantId)                  => `mtos:${tenantId}:tenders:*`,
-};
-
-/**
- * Invalidate all cache for a tenant
- * Call after any settings change
- */
-async function invalidateTenant(tenantId) {
-  const count = await del(`mtos:${tenantId}:*`);
-  logger.info(`[Cache] Invalidated ${count} keys for tenant ${tenantId}`);
-}
-
-/**
- * Invalidate salary structure cache (after structure update)
- */
-async function invalidateSalaryStructure(tenantId, structureId) {
-  await del(keys.salaryStructure(tenantId, structureId));
-  // Also invalidate any tender-specific derived caches
-  await del(`mtos:${tenantId}:tender:*`);
-}
-
-/**
- * Acquire a distributed lock (for payroll concurrency control)
- * Returns lockId if acquired, null if already locked
+ * Non-blocking key scan using SCAN cursor iteration.
+ * Replaces the blocking KEYS command that could freeze Redis for seconds.
  *
- * Simple implementation — for production use redlock package
+ * @param {string} pattern  – glob pattern, e.g. "pt:config:tenant123:*"
+ * @param {number} count    – hint to Redis for keys per batch (default 100)
+ * @returns {Promise<string[]>}
  */
-async function acquireLock(lockKey, ttlSeconds = 120) {
-  const lockId = `${Date.now()}-${Math.random()}`;
-  try {
-    const client = getClient();
-    // SET key value NX EX ttl — atomic: only sets if not exists
-    const result = await client.set(lockKey, lockId, 'EX', ttlSeconds, 'NX');
-    if (result === 'OK') return lockId;
-    return null; // null = lock already held
-  } catch (err) {
-    logger.warn(`[Cache] acquireLock failed for "${lockKey}": ${err.message}`);
-    return null;
-  }
+async function scanKeys(pattern, count = 100) {
+  const client  = getClient();
+  const results = [];
+  let   cursor  = '0';
+
+  do {
+    const [nextCursor, keys] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', count);
+    cursor = nextCursor;
+    results.push(...keys);
+  } while (cursor !== '0');
+
+  return results;
 }
 
 /**
- * Release a distributed lock (only release YOUR lock)
+ * Deletes all keys matching a glob pattern.
+ * Uses SCAN + DEL (pipeline) to avoid blocking Redis.
+ *
+ * @param {string} pattern
+ * @returns {Promise<number>}  number of keys deleted
  */
-async function releaseLock(lockKey, lockId) {
-  // Lua script: atomic check-and-delete
+async function deleteByPattern(pattern) {
+  const keys = await scanKeys(pattern);
+  if (keys.length === 0) return 0;
+
+  const client   = getClient();
+  const pipeline = client.pipeline();
+  for (const key of keys) pipeline.del(key);
+  const results = await pipeline.exec();
+
+  return results.filter(([err]) => !err).length;
+}
+
+// ─── Typed get/set/del ────────────────────────────────────────────────────────
+
+async function get(key) {
+  const raw = await getClient().get(key);
+  if (raw === null) return null;
+  try { return JSON.parse(raw); }
+  catch { return raw; }
+}
+
+async function set(key, value, ttlSeconds = TTL.DEFAULT) {
+  const serialised = typeof value === 'string' ? value : JSON.stringify(value);
+  await getClient().setex(key, ttlSeconds, serialised);
+}
+
+async function del(key) {
+  await getClient().del(key);
+}
+
+// ─── Distributed lock ─────────────────────────────────────────────────────────
+
+/**
+ * Attempts to acquire a distributed lock using SET NX EX.
+ *
+ * Returns:
+ *   true            – lock acquired
+ *   throws LockTakenError         – lock held by another process (HIGH-04: was null)
+ *   throws LockServiceError       – Redis unavailable (HIGH-04: was also null)
+ *
+ * HIGH-04 fix: the two failure modes now throw DIFFERENT typed errors so
+ * withLock() can surface the correct message to the operator.
+ */
+async function acquireLock(lockKey, ttlSeconds = TTL.PAYROLL_LOCK, ownerId = null) {
+  const owner = ownerId || `pid:${process.pid}:${Date.now()}`;
+  let result;
+  try {
+    result = await getClient().set(lockKey, owner, 'NX', 'EX', ttlSeconds);
+  } catch (err) {
+    throw new LockServiceError(lockKey, err);
+  }
+
+  if (result !== 'OK') {
+    throw new LockTakenError(lockKey);
+  }
+
+  return true;
+}
+
+/**
+ * Releases a lock. Uses a Lua script to ensure we only release our own lock.
+ */
+async function releaseLock(lockKey, ownerId) {
   const script = `
     if redis.call("get", KEYS[1]) == ARGV[1] then
       return redis.call("del", KEYS[1])
@@ -185,37 +216,98 @@ async function releaseLock(lockKey, lockId) {
       return 0
     end
   `;
-  try {
-    await getClient().eval(script, 1, lockKey, lockId);
-  } catch (err) {
-    logger.warn(`[Cache] releaseLock failed for "${lockKey}": ${err.message}`);
-  }
+  return getClient().eval(script, 1, lockKey, ownerId);
 }
 
 /**
- * withLock — acquire lock, run fn, release lock
- * Throws if lock cannot be acquired (another process is running)
+ * Executes fn() inside a distributed lock.
+ *
+ * HIGH-04 fix: callers now receive specific errors:
+ *   - LockTakenError       → another payroll run is in progress (expected)
+ *   - LockServiceError     → Redis is down (infrastructure alert, not user error)
+ *
+ * @param {string}   lockKey
+ * @param {Function} fn          – async operation to execute
+ * @param {number}   ttlSeconds  – lock lifetime
  */
-async function withLock(lockKey, fn, ttlSeconds = 120) {
-  const lockId = await acquireLock(lockKey, ttlSeconds);
-  if (lockId === false) throw new Error('Redis unavailable - please try again later.');
-  if (lockId === null) {
-    throw new Error(
-      `Operation already in progress. Another user is running this operation. ` +
-      `Please wait and try again.`
-    );
-  }
+async function withLock(lockKey, fn, ttlSeconds = TTL.PAYROLL_LOCK) {
+  const ownerId = `pid:${process.pid}:${Date.now()}`;
+
+  // acquireLock throws LockTakenError or LockServiceError — do NOT swallow here.
+  // Callers (payroll.service.js) catch and translate to appropriate HTTP responses.
+  await acquireLock(lockKey, ttlSeconds, ownerId);
+
   try {
     return await fn();
   } finally {
-    await releaseLock(lockKey, lockId);
+    await releaseLock(lockKey, ownerId).catch((err) => {
+      _getLogger().warn(
+        { err, lockKey, ownerId },
+        'Failed to release distributed lock — will expire via TTL'
+      );
+    });
   }
 }
 
-module.exports = {
-  get, set, del, getOrSet,
-  invalidateTenant, invalidateSalaryStructure,
-  acquireLock, releaseLock, withLock,
-  keys, TTL,
-};
+// ─── PT config cache with explicit invalidation (MED-04) ──────────────────────
 
+/**
+ * Invalidates the PT config cache for a specific tenant + state combination.
+ * MUST be called whenever PT slabs are updated via the admin UI.
+ *
+ * MED-04 fix: previously the cache had no invalidation path and served
+ * stale PT rates for up to 60 minutes after a government rate change.
+ */
+async function invalidatePtConfig(tenantId, state) {
+  const key = KEY.ptConfig(tenantId, state);
+  await del(key);
+  _getLogger().info({ tenantId, state, key }, 'PT config cache invalidated');
+}
+
+// ─── Logger shim (LOW-01) ─────────────────────────────────────────────────────
+
+/**
+ * Returns the application logger.
+ * Uses a console-based fallback in test environments so this module doesn't
+ * depend on the logger being fully initialised.
+ */
+function _getLogger() {
+  try {
+    return require('../config/logger');
+  } catch {
+    return {
+      info:  (...args) => console.info(...args),
+      warn:  (...args) => console.warn(...args),
+      error: (...args) => console.error(...args),
+    };
+  }
+}
+
+// ─── Exports ──────────────────────────────────────────────────────────────────
+
+module.exports = {
+  // Lifecycle
+  initRedis,
+  getClient,
+  _setClientForTest,
+  _clearClientForTest,
+
+  // Key operations
+  get,
+  set,
+  del,
+  scanKeys,
+  deleteByPattern,
+  invalidatePtConfig,
+
+  // Distributed lock
+  acquireLock,
+  releaseLock,
+  withLock,
+  LockTakenError,
+  LockServiceError,
+
+  // Constants
+  TTL,
+  KEY,
+};
